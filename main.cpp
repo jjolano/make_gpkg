@@ -68,7 +68,7 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 
 		if(stat(path, &stbuf) == -1)
 		{
-			perror("error");
+			perror(path);
 			continue;
 		}
 
@@ -86,7 +86,7 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 		{
 			// directory
 			pkg_file.flags |= PKG_FILE_DIRECTORY;
-			printf(" directory: %s\n", dp->d_name);
+			printf(" directory: %s\n", strchr(path, '/') + 1);
 
 			// add
 			pkg_file.flags = _ES32(pkg_file.flags);
@@ -100,7 +100,7 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 			// file
 			pkg_file.flags |= PKG_FILE_RAW;
 			pkg_file.data_size = _ES64(file_size);
-			printf("  raw data: %s\n", dp->d_name);
+			printf("  raw data: %s\n", strchr(path, '/') + 1);
 
 			// add
 			pkg_file.flags = _ES32(pkg_file.flags);
@@ -191,6 +191,13 @@ int main(int argc, char* argv[])
 	gpkg_crypt pkg_data_crypt = {};
 	uint8_t* pkg_data;
 
+	int path_len = strlen(argv[2]);
+
+	if(argv[2][path_len - 1] == '/')
+	{
+		argv[2][path_len - 1] = '\0';
+	}
+
 	prepare_file_data(argv[2], &pkg_files, &file_paths);
 
 	header.item_count = pkg_files.size();
@@ -245,7 +252,7 @@ int main(int argc, char* argv[])
 
 		if(stat(path, &stbuf) == -1)
 		{
-			perror("error");
+			perror(path);
 			continue;
 		}
 
@@ -259,8 +266,8 @@ int main(int argc, char* argv[])
 
 		if(filep == NULL)
 		{
-			perror("error");
-			continue;
+			perror(path);
+			return 1;
 		}
 
 		fseek(filep, 0, SEEK_END);
@@ -304,10 +311,8 @@ int main(int argc, char* argv[])
 
 	uint8_t md2[MD5_DIGEST_LENGTH] = {0xb0, 0x99, 0xde, 0xca, 0xd3, 0x3a, 0x17, 0x45, 0x79, 0x2f, 0xee, 0x11, 0xf3, 0xc2, 0x5e, 0xfe};*/
 
-	MD5(pkg_data, _ES64(header.data_size), md);
-
-	memcpy(pkg_einfo.qa_digest, md, sizeof(pkg_einfo.qa_digest));
-	memcpy(header.qa_digest, md, sizeof(header.qa_digest));
+	MD5(pkg_data, _ES64(header.data_size), pkg_einfo.qa_digest);
+	MD5(pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest), header.qa_digest);
 
 	//MD5(pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest), header.qa_digest);
 	//MD5(header.qa_digest, sizeof(header.qa_digest), header.qa_digest);
