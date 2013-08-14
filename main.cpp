@@ -38,7 +38,7 @@ int hexstr(char* dst, uint8_t* hex, const uint32_t hexlen)
 	return len;
 }
 
-void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vector<string>* file_paths)
+void prepare_file_data(string prefix, string pkg_directory, vector<gpkg_file>* pkg_files, vector<string>* file_paths)
 {
 	DIR* dirp = opendir(pkg_directory.c_str());
 
@@ -51,8 +51,8 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 	struct dirent* dp;
 	struct stat stbuf;
 
-	char* path = new char[512];
-	memset(path, 0, 512);
+	char* path = new char[1024];
+	memset(path, 0, 1024);
 
 	while((dp = readdir(dirp)) != NULL)
 	{
@@ -64,7 +64,7 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 			continue;
 		}
 
-		snprintf(path, 511, "%s/%s", pkg_directory.c_str(), dp->d_name);
+		snprintf(path, 1023, "%s/%s", pkg_directory.c_str(), dp->d_name);
 
 		if(stat(path, &stbuf) == -1)
 		{
@@ -72,7 +72,10 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 			continue;
 		}
 
-		int name_len = strlen(strchr(path, '/') + 1);
+		string file_name(prefix);
+		file_name += dp->d_name;
+
+		int name_len = file_name.size();
 		uint64_t file_size = stbuf.st_size;
 
 		gpkg_file pkg_file = {};
@@ -80,27 +83,27 @@ void prepare_file_data(string pkg_directory, vector<gpkg_file>* pkg_files, vecto
 		pkg_file.flags = PKG_FILE_OVERWRITE;
 		pkg_file.filename_size = _ES32(name_len);
 
-		file_paths->push_back(strchr(path, '/') + 1);
+		file_paths->push_back(file_name);
 
 		if((stbuf.st_mode & S_IFMT) == S_IFDIR)
 		{
 			// directory
 			pkg_file.flags |= PKG_FILE_DIRECTORY;
-			printf(" directory: %s\n", strchr(path, '/') + 1);
+			printf(" directory: %s\n", file_name.c_str());
 
 			// add
 			pkg_file.flags = _ES32(pkg_file.flags);
 			pkg_files->push_back(pkg_file);
 
 			// recurse
-			prepare_file_data(path, pkg_files, file_paths);
+			prepare_file_data(file_name + "/", path, pkg_files, file_paths);
 		}
 		else
 		{
 			// file
 			pkg_file.flags |= PKG_FILE_RAW;
 			pkg_file.data_size = _ES64(file_size);
-			printf("  raw data: %s\n", strchr(path, '/') + 1);
+			printf("  raw data: %s\n", file_name.c_str());
 
 			// add
 			pkg_file.flags = _ES32(pkg_file.flags);
@@ -191,14 +194,7 @@ int main(int argc, char* argv[])
 	gpkg_crypt pkg_data_crypt = {};
 	uint8_t* pkg_data;
 
-	int path_len = strlen(argv[2]);
-
-	if(argv[2][path_len - 1] == '/')
-	{
-		argv[2][path_len - 1] = '\0';
-	}
-
-	prepare_file_data(argv[2], &pkg_files, &file_paths);
+	prepare_file_data("", argv[2], &pkg_files, &file_paths);
 
 	header.item_count = pkg_files.size();
 
@@ -208,12 +204,13 @@ int main(int argc, char* argv[])
 
 	for(vector<gpkg_file>::iterator it = pkg_files.begin(); it != pkg_files.end(); it++)
 	{
-		header.data_size += sizeof(gpkg_file) + ALIGN(_ES32(it->filename_size), 0x10) + ALIGN(_ES64(it->data_size), 0x10);
+		header.data_size += sizeof(gpkg_file) + ALIGN(_ES64(it->data_size), 0x10);
 
 		it->filename_offset = _ES32(base_offset + filename_offset);
 		filename_offset += ALIGN(_ES32(it->filename_size), 0x10);
 	}
 
+	header.data_size += filename_offset;
 	base_offset += filename_offset;
 
 	for(vector<gpkg_file>::iterator it = pkg_files.begin(); it != pkg_files.end(); it++)
@@ -242,11 +239,11 @@ int main(int argc, char* argv[])
 
 	data_offset = 0;
 
-	char* path = new char[512];
+	char* path = new char[1024];
 
 	for(vector<string>::iterator ti = file_paths.begin(); ti != file_paths.end(); ti++)
 	{
-		snprintf(path, 511, "%s/%s", argv[2], ti->c_str());
+		snprintf(path, 1023, "%s/%s", argv[2], ti->c_str());
 
 		struct stat stbuf;
 
@@ -306,18 +303,20 @@ int main(int argc, char* argv[])
 	printf("Calculating hashes ...\n");
 
 	uint8_t md[MD5_DIGEST_LENGTH];
-
-	/*uint8_t md[MD5_DIGEST_LENGTH] = {0x49, 0xc9, 0xc1, 0xb1, 0x8c, 0x7b, 0x92, 0xcf, 0x07, 0xe6, 0x96, 0xee, 0x14, 0x62, 0xce, 0x17};
-
-	uint8_t md2[MD5_DIGEST_LENGTH] = {0xb0, 0x99, 0xde, 0xca, 0xd3, 0x3a, 0x17, 0x45, 0x79, 0x2f, 0xee, 0x11, 0xf3, 0xc2, 0x5e, 0xfe};*/
-
-	MD5(pkg_data, _ES64(header.data_size), pkg_einfo.qa_digest);
-	MD5(pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest), header.qa_digest);
-
-	//MD5(pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest), header.qa_digest);
-	//MD5(header.qa_digest, sizeof(header.qa_digest), header.qa_digest);
+	
+	MD5_CTX ctx_md5;
+	MD5_Init(&ctx_md5);
+	MD5_Update(&ctx_md5, (uint8_t*)&header, sizeof(header));
+	MD5_Update(&ctx_md5, (uint8_t*)&pkg_info, sizeof(pkg_info));
+	MD5_Update(&ctx_md5, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	MD5_Update(&ctx_md5, pkg_data, _ES64(header.data_size));
+	MD5_Final(pkg_einfo.qa_digest, &ctx_md5);
 
 	uint8_t largekey[0x40];
+
+	keyToContext(pkg_einfo.qa_digest, largekey);
+	setContextNum(largekey);
+	pkg_crypt(largekey, header.qa_digest, sizeof(header.qa_digest));
 
 	keyToContext(header.qa_digest, largekey);
 	setContextNum(largekey);
@@ -325,22 +324,18 @@ int main(int argc, char* argv[])
 
 	MD5((uint8_t*)&header, sizeof(header), md);
 	memcpy(header_crypt.shash, md, sizeof(header_crypt.shash));
-
 	keyToContext(header_crypt.shash, largekey);
 	pkg_crypt(largekey, header_crypt.crypt, sizeof(header_crypt.crypt));
 
 	MD5((uint8_t*)&pkg_info, sizeof(pkg_info), md);
 	memcpy(pkg_info_crypt.shash, md, sizeof(pkg_info_crypt.shash));
-
 	keyToContext(pkg_info_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_info_crypt.crypt, sizeof(pkg_info_crypt.crypt));
 
-	MD5(pkg_data, _ES64(header.data_size), md);
-	memcpy(pkg_data_crypt.shash, md, sizeof(pkg_data_crypt.shash));
-
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_data, _ES64(header.data_size));
-
+	MD5(pkg_data, _ES64(header.data_size), md);
+	memcpy(pkg_data_crypt.shash, md, sizeof(pkg_data_crypt.shash));
 	keyToContext(pkg_data_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_data_crypt.crypt, sizeof(pkg_data_crypt.crypt));
 
@@ -348,9 +343,9 @@ int main(int argc, char* argv[])
 	SHA1_Init(&ctx_sha1);
 	SHA1_Update(&ctx_sha1, (uint8_t*)&header, sizeof(header));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&header_crypt, sizeof(header_crypt));
-	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info_crypt, sizeof(pkg_info_crypt));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info, sizeof(pkg_info));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info_crypt, sizeof(pkg_info_crypt));
 	SHA1_Update(&ctx_sha1, pkg_data, _ES64(header.data_size));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_data_crypt, sizeof(pkg_data_crypt));
 	SHA1_Final(footer.data_sha1, &ctx_sha1);
