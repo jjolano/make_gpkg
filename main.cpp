@@ -330,13 +330,17 @@ int main(int argc, char* argv[])
 	keyToContext(header_crypt.shash, largekey);
 	pkg_crypt(largekey, header_crypt.crypt, sizeof(header_crypt.crypt));
 
-	SHA1((uint8_t*)&pkg_info, sizeof(pkg_info), sha);
+	SHA1_Init(&ctx_sha1);
+	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info, sizeof(pkg_info));
+	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	SHA1_Final(sha, &ctx_sha1);
 	memcpy(pkg_info_crypt.shash, sha + 3, sizeof(pkg_info_crypt.shash));
 	keyToContext(pkg_info_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_info_crypt.crypt, sizeof(pkg_info_crypt.crypt));
 
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_data, _ES64(header.data_size));
+	
 	SHA1(pkg_data, _ES64(header.data_size), sha);
 	memcpy(pkg_data_crypt.shash, sha + 3, sizeof(pkg_data_crypt.shash));
 	keyToContext(pkg_data_crypt.shash, largekey);
