@@ -1,4 +1,4 @@
 make_gpkg
 =========
 
-Makes an invalid debug PKG file
+Generates a debug PKG file
