@@ -31,7 +31,7 @@ int hexstr(char* dst, uint8_t* hex, const uint32_t hexlen)
 
 	for(i = 0; i < hexlen; i++)
 	{
-		len += sprintf(dst+len, "%01X", hex[i]);
+		len += sprintf(dst+len, "%02X", hex[i]);
 	}
 
 	return len;
@@ -55,9 +55,8 @@ void prepare_file_data(string prefix, string pkg_directory, vector<gpkg_file>* p
 
 	while((dp = readdir(dirp)) != NULL)
 	{
-		if(strcmp(dp->d_name, ".") == 0
-		|| strcmp(dp->d_name, "..") == 0
-		|| strcmp(dp->d_name, ".DS_Store") == 0)
+		// skip hidden files
+		if(dp->d_name[0] == '.')
 		{
 			// skip
 			continue;
@@ -332,7 +331,7 @@ int main(int argc, char* argv[])
 
 	SHA1_Init(&ctx_sha1);
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info, sizeof(pkg_info));
-	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	//SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
 	SHA1_Final(sha, &ctx_sha1);
 	memcpy(pkg_info_crypt.shash, sha + 3, sizeof(pkg_info_crypt.shash));
 	keyToContext(pkg_info_crypt.shash, largekey);
