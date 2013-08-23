@@ -331,7 +331,7 @@ int main(int argc, char* argv[])
 
 	SHA1_Init(&ctx_sha1);
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info, sizeof(pkg_info));
-	//SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
 	SHA1_Final(sha, &ctx_sha1);
 	memcpy(pkg_info_crypt.shash, sha + 3, sizeof(pkg_info_crypt.shash));
 	keyToContext(pkg_info_crypt.shash, largekey);
