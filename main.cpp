@@ -282,12 +282,27 @@ int main(int argc, char* argv[])
 
 	delete [] path;
 
+	// fix to minimum 100 KB
+	uint8_t* size_fix = NULL;
+	uint64_t pad_size = 0;
+
+	header.total_size = _ES64(header.data_offset) + header.data_size + sizeof(gpkg_crypt) + sizeof(gpkg_footer);
+
+	if(header.total_size < 102400)
+	{
+		pad_size = 102400 - header.total_size;
+		printf("Fixing pkg size to 100 KB ...\n");
+		size_fix = new uint8_t[pad_size];
+		memset(size_fix, 0, pad_size);
+		header.total_size += pad_size;
+	}
+
 	// calculate new offsets and sizes
 	printf("Calculating offsets ...\n");
 
 	header.data_size = _ES64(header.data_size);
 	header.item_count = _ES32(header.item_count);
-	header.total_size = _ES64(_ES64(header.data_offset) + _ES64(header.data_size) + sizeof(gpkg_crypt) + sizeof(gpkg_footer));
+	header.total_size = _ES64(header.total_size);
 
 	pkg_info.data_size = _ES32(_ES64(header.data_size));
 
@@ -303,36 +318,26 @@ int main(int argc, char* argv[])
 	//uint8_t md[MD5_DIGEST_LENGTH] = {0x0f, 0xfa, 0x20, 0x55, 0x54, 0xb5, 0x6b, 0xe8, 0xa0, 0x0e, 0xf8, 0x79, 0x73, 0x67, 0xae, 0x7b};
 
 	uint8_t sha[SHA_DIGEST_LENGTH];
-	
 	SHA_CTX ctx_sha1;
-	SHA1_Init(&ctx_sha1);
-	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
-	SHA1_Update(&ctx_sha1, pkg_data, _ES64(header.data_size));
-	SHA1_Final(sha, &ctx_sha1);
-	
-	memcpy(pkg_einfo.qa_digest, sha + 3, sizeof(pkg_einfo.qa_digest));
-	SHA1((uint8_t*)&pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest), sha);
+
+	SHA1(pkg_data, _ES64(header.data_size), sha);
 	memcpy(header.qa_digest, sha + 3, sizeof(header.qa_digest));
 
 	uint8_t largekey[0x40];
 
 	keyToContext(header.qa_digest, largekey);
 	setContextNum(largekey);
-	pkg_crypt(largekey, header.qa_digest, sizeof(header.qa_digest));
+	pkg_crypt(largekey, header.k_licensee, sizeof(header.k_licensee));
 
 	keyToContext(header.qa_digest, largekey);
-	setContextNum(largekey);
-	pkg_crypt(largekey, header.k_licensee, sizeof(header.k_licensee));
+	pkg_crypt(largekey, pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest));
 
 	SHA1((uint8_t*)&header, sizeof(header), sha);
 	memcpy(header_crypt.shash, sha + 3, sizeof(header_crypt.shash));
 	keyToContext(header_crypt.shash, largekey);
 	pkg_crypt(largekey, header_crypt.crypt, sizeof(header_crypt.crypt));
 
-	SHA1_Init(&ctx_sha1);
-	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info, sizeof(pkg_info));
-	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
-	SHA1_Final(sha, &ctx_sha1);
+	SHA1((uint8_t*)&pkg_info, sizeof(pkg_info), sha);
 	memcpy(pkg_info_crypt.shash, sha + 3, sizeof(pkg_info_crypt.shash));
 	keyToContext(pkg_info_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_info_crypt.crypt, sizeof(pkg_info_crypt.crypt));
@@ -353,14 +358,20 @@ int main(int argc, char* argv[])
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_info_crypt, sizeof(pkg_info_crypt));
 	SHA1_Update(&ctx_sha1, pkg_data, _ES64(header.data_size));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&pkg_data_crypt, sizeof(pkg_data_crypt));
+
+	if(size_fix != NULL)
+	{
+		SHA1_Update(&ctx_sha1, size_fix, pad_size);
+	}
+
 	SHA1_Final(footer.data_sha1, &ctx_sha1);
 
 	char digest[sizeof(header.qa_digest) * 2];
 	hexstr(digest, header.qa_digest, sizeof(header.qa_digest));
-	printf(" PKG QA_Digest (crypt): %s\n", digest);
+	printf(" PKG QA_Digest: %s\n", digest);
 
 	hexstr(digest, pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest));
-	printf(" PKG QA_Digest: %s\n", digest);
+	printf(" PKG QA_Digest2: %s\n", digest);
 
 	/*char klicensee[sizeof(header.k_licensee) * 2];
 	hexstr(klicensee, header.k_licensee, sizeof(header.k_licensee));
@@ -388,6 +399,12 @@ int main(int argc, char* argv[])
 	fwrite((uint8_t*)&pkg_info_crypt, 1, sizeof(pkg_info_crypt), filep);
 	fwrite(pkg_data, 1, _ES64(header.data_size), filep);
 	fwrite((uint8_t*)&pkg_data_crypt, 1, sizeof(pkg_data_crypt), filep);
+
+	if(size_fix != NULL)
+	{
+		fwrite(size_fix, 1, pad_size, filep);
+	}
+
 	fwrite((uint8_t*)&footer, 1, sizeof(footer), filep);
 	fclose(filep);
 
