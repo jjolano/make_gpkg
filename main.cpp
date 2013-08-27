@@ -12,6 +12,8 @@
 
 #include <openssl/sha.h>
 #include <openssl/md5.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 
 #include "bytes.h"
 #include "pkg.h"
@@ -318,22 +320,31 @@ int main(int argc, char* argv[])
 
 	SHA_CTX ctx_sha1;
 	MD5_CTX ctx_md5;
-
-	MD5(pkg_data, _ES64(header.data_size), header.qa_digest);
+	EVP_MD_CTX ctx_evp;
 
 	uint8_t largekey[0x40];
 
+	// calculate qa_digest1
+	MD5(pkg_data, _ES64(header.data_size), header.qa_digest);
+	keyToContext(header.k_licensee, largekey);
+	setContextNum(largekey);
+	pkg_crypt(largekey, header.qa_digest, sizeof(header.qa_digest));
+
+	// k_licensee crypt
 	keyToContext(header.qa_digest, largekey);
 	setContextNum(largekey);
 	pkg_crypt(largekey, header.k_licensee, sizeof(header.k_licensee));
 
+	// calculate qa_digest2
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest));
 
+	// header hash
 	MD5((uint8_t*)&header, sizeof(header), header_crypt.shash);
 	keyToContext(header_crypt.shash, largekey);
 	pkg_crypt(largekey, header_crypt.crypt, sizeof(header_crypt.crypt));
 
+	// info hash
 	MD5_Init(&ctx_md5);
 	MD5_Update(&ctx_md5, (uint8_t*)&pkg_info, sizeof(pkg_info));
 	MD5_Update(&ctx_md5, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
@@ -341,13 +352,16 @@ int main(int argc, char* argv[])
 	keyToContext(pkg_info_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_info_crypt.crypt, sizeof(pkg_info_crypt.crypt));
 
+	// data crypt
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_data, _ES64(header.data_size));
-	
+
+	// data hash
 	MD5(pkg_data, _ES64(header.data_size), pkg_data_crypt.shash);
 	keyToContext(pkg_data_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_data_crypt.crypt, sizeof(pkg_data_crypt.crypt));
 
+	// file sha1_digest - 0x20
 	SHA1_Init(&ctx_sha1);
 	SHA1_Update(&ctx_sha1, (uint8_t*)&header, sizeof(header));
 	SHA1_Update(&ctx_sha1, (uint8_t*)&header_crypt, sizeof(header_crypt));
