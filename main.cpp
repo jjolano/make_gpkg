@@ -11,6 +11,7 @@
 #include <sys/types.h>
 
 #include <openssl/sha.h>
+#include <openssl/md5.h>
 
 #include "bytes.h"
 #include "pkg.h"
@@ -315,13 +316,10 @@ int main(int argc, char* argv[])
 	// calculate hashes
 	printf("Calculating hashes ...\n");
 
-	//uint8_t md[MD5_DIGEST_LENGTH] = {0x0f, 0xfa, 0x20, 0x55, 0x54, 0xb5, 0x6b, 0xe8, 0xa0, 0x0e, 0xf8, 0x79, 0x73, 0x67, 0xae, 0x7b};
-
-	uint8_t sha[SHA_DIGEST_LENGTH];
 	SHA_CTX ctx_sha1;
+	MD5_CTX ctx_md5;
 
-	SHA1(pkg_data, _ES64(header.data_size), sha);
-	memcpy(header.qa_digest, sha + 3, sizeof(header.qa_digest));
+	MD5(pkg_data, _ES64(header.data_size), header.qa_digest);
 
 	uint8_t largekey[0x40];
 
@@ -332,21 +330,21 @@ int main(int argc, char* argv[])
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_einfo.qa_digest, sizeof(pkg_einfo.qa_digest));
 
-	SHA1((uint8_t*)&header, sizeof(header), sha);
-	memcpy(header_crypt.shash, sha + 3, sizeof(header_crypt.shash));
+	MD5((uint8_t*)&header, sizeof(header), header_crypt.shash);
 	keyToContext(header_crypt.shash, largekey);
 	pkg_crypt(largekey, header_crypt.crypt, sizeof(header_crypt.crypt));
 
-	SHA1((uint8_t*)&pkg_info, sizeof(pkg_info), sha);
-	memcpy(pkg_info_crypt.shash, sha + 3, sizeof(pkg_info_crypt.shash));
+	MD5_Init(&ctx_md5);
+	MD5_Update(&ctx_md5, (uint8_t*)&pkg_info, sizeof(pkg_info));
+	MD5_Update(&ctx_md5, (uint8_t*)&pkg_einfo, sizeof(pkg_einfo));
+	MD5_Final(pkg_info_crypt.shash, &ctx_md5);
 	keyToContext(pkg_info_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_info_crypt.crypt, sizeof(pkg_info_crypt.crypt));
 
 	keyToContext(header.qa_digest, largekey);
 	pkg_crypt(largekey, pkg_data, _ES64(header.data_size));
 	
-	SHA1(pkg_data, _ES64(header.data_size), sha);
-	memcpy(pkg_data_crypt.shash, sha + 3, sizeof(pkg_data_crypt.shash));
+	MD5(pkg_data, _ES64(header.data_size), pkg_data_crypt.shash);
 	keyToContext(pkg_data_crypt.shash, largekey);
 	pkg_crypt(largekey, pkg_data_crypt.crypt, sizeof(pkg_data_crypt.crypt));
 
